@@ -226,11 +226,7 @@ app = Flask(__name__)
 PROCESSED = set()  # Meta retries webhooks, so skip messages we've already handled
 
 
-@app.route("/")
-def home():
-    return "Clinic bot is running"
-
-
+@app.route("/", methods=["GET"])
 @app.route("/webhook", methods=["GET"])
 def verify():
     if (
@@ -238,9 +234,12 @@ def verify():
         and request.args.get("hub.verify_token") == VERIFY_TOKEN
     ):
         return request.args.get("hub.challenge", ""), 200
+    if not request.args.get("hub.mode"):
+        return "Clinic bot is running", 200
     return "Forbidden", 403
 
 
+@app.route("/", methods=["POST"])
 @app.route("/webhook", methods=["POST"])
 def incoming():
     data = request.get_json(silent=True) or {}
