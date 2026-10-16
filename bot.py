@@ -12,6 +12,12 @@ from flask import Flask, request
 from google import genai
 from google.genai import types
 
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
+
 # ---------------- CONFIG ----------------
 CLINIC_NAME = "GlowDerm Skin & Hair Clinic"
 GOOGLE_REVIEW_LINK = os.getenv("GOOGLE_REVIEW_LINK", "https://g.page/r/YOUR_LINK/review")
