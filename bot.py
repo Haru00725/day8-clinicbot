@@ -31,12 +31,12 @@ ADMIN_KEY = os.getenv("ADMIN_KEY", "demo123")
 GRAPH_VERSION = "v21.0"  # change if Meta shows a newer version in API Setup
 
 # Current supported Gemini models with automatic fallbacks
-CHAT_MODEL = os.getenv("CHAT_MODEL", "gemini-3.6-flash")
+CHAT_MODEL = os.getenv("CHAT_MODEL", "gemini-flash-lite-latest")
 CANDIDATE_CHAT_MODELS = [
     CHAT_MODEL,
+    "gemini-3.5-flash-lite",
+    "gemini-3.6-flash",
     "gemini-3.5-flash",
-    "gemini-3.8-flash",
-    "gemini-3.7-flash",
 ]
 EMBED_MODEL = "gemini-embedding-001"
 
