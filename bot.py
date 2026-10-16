@@ -30,8 +30,14 @@ ADMIN_KEY = os.getenv("ADMIN_KEY", "demo123")
 
 GRAPH_VERSION = "v21.0"  # change if Meta shows a newer version in API Setup
 
-# If you get a "model not found" error, change these to current Gemini models
-CHAT_MODEL = "gemini-2.5-flash"
+# Current supported Gemini models with automatic fallbacks
+CHAT_MODEL = os.getenv("CHAT_MODEL", "gemini-3.6-flash")
+CANDIDATE_CHAT_MODELS = [
+    CHAT_MODEL,
+    "gemini-3.5-flash",
+    "gemini-3.8-flash",
+    "gemini-3.7-flash",
+]
 EMBED_MODEL = "gemini-embedding-001"
 
 SLOTS = ["10:00", "11:00", "12:00", "14:00", "15:00", "16:00", "17:00"]
@@ -139,37 +145,39 @@ or, when confirmed:
     convo = "\n".join(f"{role}: {text}" for role, text in history[-10:])
     prompt = f"Conversation so far:\n{convo}\n\nCustomer: {user_msg}"
 
-    try:
-        resp = client.models.generate_content(
-            model=CHAT_MODEL,
-            contents=prompt,
-            config=types.GenerateContentConfig(
-                system_instruction=system,
-                response_mime_type="application/json",
-                temperature=0.3,
-            ),
-        )
-        data = parse_json(resp.text)
-        reply = data.get("reply", "Sorry, could you say that again?")
-        booking = data.get("booking")
+    reply = "Sorry, something went wrong. Please try again in a moment."
+    for model_name in CANDIDATE_CHAT_MODELS:
+        try:
+            resp = client.models.generate_content(
+                model=model_name,
+                contents=prompt,
+                config=types.GenerateContentConfig(
+                    system_instruction=system,
+                    response_mime_type="application/json",
+                    temperature=0.3,
+                ),
+            )
+            data = parse_json(resp.text)
+            reply = data.get("reply", "Sorry, could you say that again?")
+            booking = data.get("booking")
 
-        if booking:
-            date, time = booking.get("date"), booking.get("time")
-            with db_lock:
-                if time in free_slots(date):
-                    db.execute(
-                        "INSERT INTO appointments (phone, name, service, date, time) VALUES (?,?,?,?,?)",
-                        (phone, booking["name"], booking["service"], date, time),
-                    )
-                    db.commit()
-                else:
-                    reply = (
-                        f"Sorry, {time} on {date} just got taken. "
-                        f"Free slots that day: {', '.join(free_slots(date)) or 'none'}."
-                    )
-    except Exception as e:
-        print("Bot error:", e)
-        reply = "Sorry, something went wrong. Please try again in a moment."
+            if booking:
+                date, time = booking.get("date"), booking.get("time")
+                with db_lock:
+                    if time in free_slots(date):
+                        db.execute(
+                            "INSERT INTO appointments (phone, name, service, date, time) VALUES (?,?,?,?,?)",
+                            (phone, booking["name"], booking["service"], date, time),
+                        )
+                        db.commit()
+                    else:
+                        reply = (
+                            f"Sorry, {time} on {date} just got taken. "
+                            f"Free slots that day: {', '.join(free_slots(date)) or 'none'}."
+                        )
+            break
+        except Exception as e:
+            print(f"Bot error with {model_name}:", e)
 
     history.append(("Customer", user_msg))
     history.append(("Assistant", reply))
