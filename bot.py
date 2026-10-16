@@ -76,18 +76,25 @@ def embed(texts):
     return np.array([e.values for e in res.embeddings])
 
 
-with open("clinic_knowledge.txt", encoding="utf-8") as f:
-    CHUNKS = [c.strip() for c in f.read().split("\n\n") if c.strip()]
-CHUNK_VECS = embed(CHUNKS)
+try:
+    with open("clinic_knowledge.txt", encoding="utf-8") as f:
+        CHUNKS = [c.strip() for c in f.read().split("\n\n") if c.strip()]
+except Exception:
+    CHUNKS = []
+
+CHUNK_VECS = embed(CHUNKS) if CHUNKS else np.array([])
 
 
 def retrieve(query, k=3):
+    if not CHUNKS or CHUNK_VECS.size == 0:
+        return []
     qv = embed([query])[0]
     sims = (CHUNK_VECS @ qv) / (
         np.linalg.norm(CHUNK_VECS, axis=1) * np.linalg.norm(qv)
     )
     top = np.argsort(sims)[::-1][:k]
     return [CHUNKS[i] for i in top]
+
 
 
 # ---------------- BOT BRAIN ----------------
