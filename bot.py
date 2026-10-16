@@ -84,16 +84,22 @@ def embed(texts):
 
 try:
     with open("clinic_knowledge.txt", encoding="utf-8") as f:
-        CHUNKS = [c.strip() for c in f.read().split("\n\n") if c.strip()]
+        CLINIC_KNOWLEDGE_FULL = f.read().strip()
+        CHUNKS = [c.strip() for c in CLINIC_KNOWLEDGE_FULL.split("\n\n") if c.strip()]
 except Exception:
+    CLINIC_KNOWLEDGE_FULL = ""
     CHUNKS = []
 
-CHUNK_VECS = embed(CHUNKS) if CHUNKS else np.array([])
+# Only compute embeddings if clinic knowledge is very large (>8000 characters)
+CHUNK_VECS = embed(CHUNKS) if (len(CLINIC_KNOWLEDGE_FULL) > 8000 and CHUNKS) else np.array([])
 
 
 def retrieve(query, k=3):
+    # Fast path: For standard clinic knowledge, directly return all knowledge (0ms latency, zero embedding API calls!)
+    if len(CLINIC_KNOWLEDGE_FULL) <= 8000:
+        return [CLINIC_KNOWLEDGE_FULL]
     if not CHUNKS or CHUNK_VECS.size == 0:
-        return []
+        return [CLINIC_KNOWLEDGE_FULL] if CLINIC_KNOWLEDGE_FULL else []
     qv = embed([query])[0]
     sims = (CHUNK_VECS @ qv) / (
         np.linalg.norm(CHUNK_VECS, axis=1) * np.linalg.norm(qv)
@@ -105,6 +111,7 @@ def retrieve(query, k=3):
 
 # ---------------- BOT BRAIN ----------------
 HISTORY = {}
+http_session = requests.Session()
 
 
 def parse_json(raw):
@@ -115,8 +122,7 @@ def parse_json(raw):
 
 def ask_bot(phone, user_msg):
     history = HISTORY.setdefault(phone, [])
-    search_text = user_msg + " " + " ".join(t for _, t in history[-2:])
-    context = "\n\n".join(retrieve(search_text))
+    context = "\n\n".join(retrieve(user_msg))
     today = datetime.now().strftime("%A, %Y-%m-%d")
 
     system = f"""You are the WhatsApp assistant for {CLINIC_NAME}. Today is {today}.
@@ -154,7 +160,8 @@ or, when confirmed:
                 config=types.GenerateContentConfig(
                     system_instruction=system,
                     response_mime_type="application/json",
-                    temperature=0.3,
+                    max_output_tokens=200,
+                    temperature=0.2,
                 ),
             )
             data = parse_json(resp.text)
@@ -185,6 +192,22 @@ or, when confirmed:
 
 
 # ---------------- WHATSAPP (META CLOUD API) ----------------
+def mark_read(msg_id):
+    if not WHATSAPP_TOKEN or not PHONE_NUMBER_ID or not msg_id:
+        return
+    url = f"https://graph.facebook.com/{GRAPH_VERSION}/{PHONE_NUMBER_ID}/messages"
+    payload = {
+        "messaging_product": "whatsapp",
+        "status": "read",
+        "message_id": msg_id,
+    }
+    headers = {"Authorization": f"Bearer {WHATSAPP_TOKEN}"}
+    try:
+        http_session.post(url, json=payload, headers=headers, timeout=5)
+    except Exception:
+        pass
+
+
 def send_whatsapp(to, body):
     if not WHATSAPP_TOKEN or not PHONE_NUMBER_ID:
         print(f"[WhatsApp to {to}] {body}")
@@ -198,14 +221,16 @@ def send_whatsapp(to, body):
     }
     headers = {"Authorization": f"Bearer {WHATSAPP_TOKEN}"}
     try:
-        r = requests.post(url, json=payload, headers=headers, timeout=15)
+        r = http_session.post(url, json=payload, headers=headers, timeout=10)
         if r.status_code >= 400:
             print("Meta send error:", r.status_code, r.text)
     except Exception as e:
         print("Meta send exception:", e)
 
 
-def handle_message(phone, text):
+def handle_message(phone, text, msg_id=None):
+    if msg_id:
+        mark_read(msg_id)
     reply = ask_bot(phone, text)
     send_whatsapp(phone, reply)
 
@@ -260,7 +285,7 @@ def incoming():
                 PROCESSED.add(m["id"])
                 threading.Thread(
                     target=handle_message,
-                    args=(m["from"], m["text"]["body"]),
+                    args=(m["from"], m["text"]["body"], m["id"]),
                     daemon=True,
                 ).start()
     except (KeyError, IndexError):
